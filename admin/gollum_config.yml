@@ -1,0 +1,8 @@
+# Configuration
+config:
+  wikidir: /wiki
+  gollumconfigfile: /wiki/admin/config.rb
+  gollumport: 1990
+  templatedir: /wiki/admin/templates
+  plantuml_port: 1980
+  gollum_plantuml_url: http://localhost:$config_plantuml_port/png
