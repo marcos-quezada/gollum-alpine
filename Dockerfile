@@ -1,41 +1,58 @@
+FROM alpine AS pandoc-builder
+
+RUN apk --no-cache add \
+         alpine-sdk \
+         bash \
+         ca-certificates \
+         cabal \
+         fakeroot \
+         ghc \
+         git \
+         gmp-dev \
+         lua5.3-dev \
+         pkgconfig \
+         zlib-dev
+
+# Install newer cabal-install version
+COPY cabal.root.config /root/.cabal/config
+RUN cabal update \
+  && cabal install cabal-install \
+  && mv /root/.cabal/bin/cabal /usr/local/bin/cabal
+
+# Get sources
+ARG pandoc_commit=master
+RUN git clone --branch=$pandoc_commit --depth=1 --quiet \
+        https://github.com/jgm/pandoc /usr/src/pandoc
+
+# Install Haskell dependencies
+WORKDIR /usr/src/pandoc
+RUN cabal --version \
+  && ghc --version \
+  && cabal new-update \
+  && cabal new-clean \
+  && cabal new-configure \
+           --flag embed_data_files \
+           --flag bibutils \
+           --constraint 'hslua +system-lua +pkg-config' \
+           --enable-tests \
+           . pandoc-citeproc \
+  && cabal new-build . pandoc-citeproc
+
+FROM pandoc-builder AS pandoc-binaries
+RUN find dist-newstyle \
+         -name 'pandoc*' -type f -perm +400 \
+         -exec cp '{}' /usr/bin/ ';' \
+  && strip /usr/bin/pandoc /usr/bin/pandoc-citeproc
+
 FROM ruby:2.6.5-alpine3.10
 
-ENV PANDOC_VERSION 2.7.3
-ENV PANDOC_DOWNLOAD_URL https://hackage.haskell.org/package/pandoc-$PANDOC_VERSION/pandoc-$PANDOC_VERSION.tar.gz
-ENV PANDOC_ROOT /usr/local/pandoc
+COPY --from=pandoc-binaries /usr/bin/pandoc* /usr/bin/
 
-ENV PATH $PATH:$PANDOC_ROOT/bin
-
-# The default mirror (dl-cdn.alpinelinux.org) has issues sometimes for me
-# More mirrors available here: mirrors.alpinelinux.org
-RUN apk update
-RUN apk add --no-cache --virtual build-deps build-base
-RUN apk add --no-cache icu-dev icu-libs cmake git
-
-RUN gem install gollum
-RUN gem install github-markdown
-
-# Install/Build Packages for pandoc
-RUN apk add --no-cache --virtual linux-headers sed ttf-droid ttf-droid-nonlatin alpine-sdk coreutils
-RUN apk add --no-cache ghc musl-dev zlib zlib-dev cabal curl bash
-
-RUN curl -fsSL "$PANDOC_DOWNLOAD_URL" -o pandoc.tar.gz
-RUN tar xvzf pandoc.tar.gz
-RUN rm -f pandoc.tar.gz
-WORKDIR /pandoc-$PANDOC_VERSION
-RUN cabal update
-RUN cabal install cabal-install
-RUN cabal install --only-dependencies
-RUN cabal configure --prefix=$PANDOC_ROOT
-RUN cabal build
-RUN cabal copy
-WORKDIR /
-
-RUN apk del --purge build-deps cmake build-base build-deps icu-dev alpine-sdk cabal coreutils ghc libffi musl-dev zlib-dev
-RUN rm -Rf /root/.cabal/ /root/.ghc/ /root/pandoc-$PANDOC_VERSION
-
-ENV PATH $PATH:$PANDOC_ROOT/bin
-
+RUN apk add --no-cache \
+         gmp \
+         libffi \
+         lua5.3 \
+         lua5.3-lpeg
 # Copy wiki admin files
 COPY admin /wiki_admin/
 
